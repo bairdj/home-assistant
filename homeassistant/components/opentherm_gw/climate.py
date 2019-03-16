@@ -39,8 +39,6 @@ class OpenThermGateway(ClimateDevice):
         self._current_operation = STATE_IDLE
         self._current_temperature = None
         self._target_temperature = None
-        self._away_mode_a = None
-        self._away_mode_b = None
         self._away_state_a = False
         self._away_state_b = False
 
@@ -61,6 +59,7 @@ class OpenThermGateway(ClimateDevice):
             self._current_operation = STATE_COOL
         else:
             self._current_operation = STATE_IDLE
+
         self._current_temperature = status.get(self._gw_vars.DATA_ROOM_TEMP)
 
         temp = status.get(self._gw_vars.DATA_ROOM_SETPOINT_OVRD)
@@ -70,26 +69,20 @@ class OpenThermGateway(ClimateDevice):
 
         # GPIO mode 5: 0 == Away
         # GPIO mode 6: 1 == Away
-        gpio_a_state = status.get(self._gw_vars.OTGW_GPIO_A)
-        if gpio_a_state == 5:
-            self._away_mode_a = 0
-        elif gpio_a_state == 6:
-            self._away_mode_a = 1
-        else:
-            self._away_mode_a = None
-        gpio_b_state = status.get(self._gw_vars.OTGW_GPIO_B)
-        if gpio_b_state == 5:
-            self._away_mode_b = 0
-        elif gpio_b_state == 6:
-            self._away_mode_b = 1
-        else:
-            self._away_mode_b = None
-        if self._away_mode_a is not None:
-            self._away_state_a = (status.get(
-                self._gw_vars.OTGW_GPIO_A_STATE) == self._away_mode_a)
-        if self._away_mode_b is not None:
-            self._away_state_b = (status.get(
-                self._gw_vars.OTGW_GPIO_B_STATE) == self._away_mode_b)
+        gpio_a = status.get(self._gw_vars.OTGW_GPIO_A)
+        gpio_a_state = status.get(self._gw_vars.OTGW_GPIO_A_STATE)
+        if gpio_a == 5:
+            self._away_state_a = (gpio_a_state == 0)
+        elif gpio_a == 6:
+            self._away_state_a = (gpio_a_state == 1)
+
+        gpio_b = status.get(self._gw_vars.OTGW_GPIO_B)
+        gpio_b_state = status.get(self._gw_vars.OTGW_GPIO_B_STATE)
+        if gpio_b == 5:
+            self._away_state_b = (gpio_b_state == 0)
+        elif gpio_b == 6:
+            self._away_state_b = (gpio_b_state == 1)
+
         self.async_schedule_update_ha_state()
 
     @property
@@ -125,14 +118,15 @@ class OpenThermGateway(ClimateDevice):
     def current_temperature(self):
         """Return the current temperature."""
         if self._current_temperature is None:
-            return
-        if self.floor_temp is True:
-            if self.temp_precision == PRECISION_HALVES:
-                return int(2 * self._current_temperature) / 2
-            if self.temp_precision == PRECISION_TENTHS:
-                return int(10 * self._current_temperature) / 10
-            return int(self._current_temperature)
-        return self._current_temperature
+            return None
+        if not self.floor_temp:
+            return self._current_temperature
+
+        if self.temp_precision == PRECISION_HALVES:
+            return int(2 * self._current_temperature) / 2
+        if self.temp_precision == PRECISION_TENTHS:
+            return int(10 * self._current_temperature) / 10
+        return int(self._current_temperature)
 
     @property
     def target_temperature(self):
@@ -151,11 +145,12 @@ class OpenThermGateway(ClimateDevice):
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
-        if ATTR_TEMPERATURE in kwargs:
-            temp = float(kwargs[ATTR_TEMPERATURE])
-            self._target_temperature = await self._gateway.set_target_temp(
-                temp)
-            self.async_schedule_update_ha_state()
+        if ATTR_TEMPERATURE not in kwargs:
+            return
+        temp = float(kwargs[ATTR_TEMPERATURE])
+        self._target_temperature = await self._gateway.set_target_temp(
+            temp)
+        self.async_schedule_update_ha_state()
 
     @property
     def supported_features(self):
